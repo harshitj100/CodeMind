@@ -177,28 +177,30 @@ Ask me questions about modules, specific functions, classes, or design flow, and
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 6.5rem)', maxWidth: '880px', margin: '0 auto', width: '100%', position: 'relative' }}>
       
       {/* Header controls for RAG Chat */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', width: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.78rem', padding: '0.2rem 0.6rem', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', color: '#10B981', fontWeight: '600' }}>
-            ● RAG Index Loaded
-          </span>
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Mistral Model</span>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.6rem', width: '100%' }}>
         <button 
           onClick={handleClearChat}
           style={{
-            background: 'rgba(255, 255, 255, 0.02)',
+            background: 'rgba(255, 255, 255, 0.03)',
             border: '1px solid var(--border-glass)',
-            padding: '0.4rem 0.85rem',
-            borderRadius: '16px',
+            padding: '0.35rem 0.65rem',
+            borderRadius: '8px',
             color: 'var(--text-muted)',
-            fontSize: '0.78rem',
+            fontSize: '0.74rem',
             cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
             transition: 'var(--transition-fast)'
           }}
-          className="new-tutorial-btn"
+          title="Clear Conversation"
+          className="clear-chat-btn"
         >
-          Clear Conversation
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.8 }}>
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          <span>Clear chat</span>
         </button>
       </div>
 

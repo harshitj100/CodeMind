@@ -9,17 +9,35 @@ import Workspace from './components/Workspace'
 export default function App() {
   const [username, setUsername] = useState(null)
   const [viewMode, setViewMode] = useState('auth') // 'auth' | 'landing' | 'loading' | 'workspace'
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark') // 'dark' | 'light'
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [history, setHistory] = useState([])
   const [activeTutorial, setActiveTutorial] = useState(null)
   const [loadingRepo, setLoadingRepo] = useState('')
 
-  // 1. Sync React viewMode and theme with document.body.className for stylesheet states
+  // 1. Sync React viewMode with document.body.className and enforce dark theme
   useEffect(() => {
-    document.body.className = `mode-${viewMode} theme-${theme}`
-  }, [viewMode, theme])
+    document.body.className = `mode-${viewMode} theme-dark`
+  }, [viewMode])
 
-  // 2. Check local session cache on startup
+  // 2. Global Click Ripple animation effect
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      const ripple = document.createElement('div')
+      ripple.className = 'click-ripple'
+      ripple.style.left = `${e.clientX}px`
+      ripple.style.top = `${e.clientY}px`
+      document.body.appendChild(ripple)
+      setTimeout(() => {
+        ripple.remove()
+      }, 550)
+    }
+    window.addEventListener('click', handleGlobalClick)
+    return () => {
+      window.removeEventListener('click', handleGlobalClick)
+    }
+  }, [])
+
+  // 3. Check local session cache on startup
   useEffect(() => {
     const storedUser = localStorage.getItem('username')
     if (storedUser) {
@@ -30,12 +48,6 @@ export default function App() {
       setViewMode('auth')
     }
   }, [])
-
-  const handleToggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark'
-    setTheme(nextTheme)
-    localStorage.setItem('theme', nextTheme)
-  }
 
   // 3. Fetch user history from MongoDB
   const fetchHistory = async (user) => {
@@ -145,7 +157,7 @@ export default function App() {
   return (
     <>
       {/* 2D Particles & Star constellations background canvas */}
-      <BackgroundCanvas viewMode={viewMode} theme={theme} />
+      <BackgroundCanvas viewMode={viewMode} theme="dark" />
 
       {/* Volumetric HSL Edge Glows */}
       <div className="glow-orb glow-orb-1"></div>
@@ -155,7 +167,7 @@ export default function App() {
       {viewMode === 'auth' ? (
         <AuthPanel onAuthSuccess={handleAuthSuccess} />
       ) : (
-        <div id="app-layout" className="app-layout">
+        <div id="app-layout" className={`app-layout ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
           {/* Persistent Left Sidebar History Panel */}
           <Sidebar 
             history={history}
@@ -165,8 +177,8 @@ export default function App() {
             onDelete={handleDeleteTutorial}
             onNewClick={handleGoHome}
             onLogout={handleLogout}
-            theme={theme}
-            onToggleTheme={handleToggleTheme}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           />
 
           {/* Right Side Main Stage */}

@@ -38,6 +38,14 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(NoCacheMiddleware)
 
+def normalize_git_url(url: str) -> str:
+    if not url or not isinstance(url, str):
+        return ""
+    url = url.strip().rstrip('/')
+    if url.endswith('.git'):
+        url = url[:-4]
+    return url.lower()
+
 # --- Serve Static Assets ---
 if not os.path.exists("static"):
     os.makedirs("static")
@@ -193,6 +201,7 @@ def get_tutorial_details(tutorial_id: str):
         
     return {
         "success": True,
+        "id": tutorial_id,
         "project_name": tutorial.get("project_name", "sample-project"),
         "repo_url": tutorial.get("repo_url", ""),
         "status": tutorial.get("status", "completed"),
@@ -679,7 +688,7 @@ def run_background_pipeline(doc_id: str, repo_url: str, username: str):
 def generate_tutorial(request: GenerateRequest, background_tasks: BackgroundTasks):
     """
     Triggers parallel RAG indexing + tutorial generation pipeline in the background.
-    Returns immediately with indexing status.
+    Returns immediately with indexing status, or cached completed tutorial if available.
     """
     repo_url = request.repo_url.strip()
     username = request.username.strip().lower()
@@ -689,6 +698,121 @@ def generate_tutorial(request: GenerateRequest, background_tasks: BackgroundTask
     if not username:
         raise HTTPException(status_code=400, detail="User session not found. Please log in.")
         
+    normalized_target = normalize_git_url(repo_url)
+    cached_tutorial = None
+    
+    # 1. Check if the current user already has a completed tutorial for this repo
+    if not db_fallback:
+        try:
+            user_tutorials = list(db.tutorials.find({
+                "username": username,
+                "status": "completed"
+            }))
+            for t in user_tutorials:
+                if normalize_git_url(t.get("repo_url", "")) == normalized_target:
+                    cached_tutorial = t
+                    break
+        except Exception:
+            pass
+    else:
+        for t in db.tutorials.find({"username": username, "status": "completed"}):
+            if normalize_git_url(t.get("repo_url", "")) == normalized_target:
+                cached_tutorial = t
+                break
+                
+    if cached_tutorial:
+        # User already has this completed tutorial, return it directly
+        return {
+            "success": True,
+            "id": str(cached_tutorial["_id"]),
+            "project_name": cached_tutorial.get("project_name", "sample-project"),
+            "repo_url": cached_tutorial.get("repo_url", repo_url),
+            "status": "completed",
+            "chat_ready": True,
+            "index_content": cached_tutorial.get("index_content", ""),
+            "chapters": cached_tutorial.get("chapters", []),
+            "graph": cached_tutorial.get("graph")
+        }
+        
+    # 2. Check if ANY user has a completed tutorial for this repo to reuse it
+    if not db_fallback:
+        try:
+            completed_tutorials = list(db.tutorials.find({"status": "completed"}))
+            for t in completed_tutorials:
+                if normalize_git_url(t.get("repo_url", "")) == normalized_target:
+                    cached_tutorial = t
+                    break
+        except Exception:
+            pass
+    else:
+        for t in db.tutorials.find({"status": "completed"}):
+            if normalize_git_url(t.get("repo_url", "")) == normalized_target:
+                cached_tutorial = t
+                break
+                
+    if cached_tutorial:
+        # We found a completed tutorial from another user!
+        # Copy the metadata for the current user so they have their own copy in history
+        new_tutorial_doc = {
+            "username": username,
+            "repo_url": repo_url,
+            "project_name": cached_tutorial.get("project_name", "sample-project"),
+            "status": "completed",
+            "chat_ready": True,
+            "index_content": cached_tutorial.get("index_content", ""),
+            "chapters": cached_tutorial.get("chapters", []),
+            "graph": cached_tutorial.get("graph"),
+            "created_at": datetime.utcnow()
+        }
+        
+        if not db_fallback:
+            try:
+                result = db.tutorials.insert_one(new_tutorial_doc)
+                new_doc_id = str(result.inserted_id)
+            except Exception as e:
+                print(f"Error inserting cached tutorial doc: {e}")
+                new_doc_id = None
+        else:
+            import uuid
+            new_doc_id = str(uuid.uuid4())
+            new_tutorial_doc["_id"] = new_doc_id
+            db.tutorials.data[new_doc_id] = new_tutorial_doc
+            
+        if new_doc_id:
+            # Copy RAG chunks in MongoDB to this new repo_id so chat functionality works immediately
+            try:
+                from utils.rag_pipeline import get_db_client
+                db_client = get_db_client()
+                old_repo_id = str(cached_tutorial["_id"])
+                chunks = list(db_client.chunks.find({"repo_id": old_repo_id}))
+                if chunks:
+                    new_chunks = []
+                    for chunk in chunks:
+                        chunk_copy = dict(chunk)
+                        if "_id" in chunk_copy:
+                            del chunk_copy["_id"]
+                        chunk_copy["repo_id"] = new_doc_id
+                        if "chunk_id" in chunk_copy:
+                            chunk_copy["chunk_id"] = chunk_copy["chunk_id"].replace(old_repo_id, new_doc_id)
+                        new_chunks.append(chunk_copy)
+                    db_client.chunks.insert_many(new_chunks)
+                    print(f"Successfully copied {len(new_chunks)} RAG chunks from {old_repo_id} to {new_doc_id}")
+            except Exception as e:
+                print(f"Error copying cached chunks: {e}")
+                
+            return {
+                "success": True,
+                "id": new_doc_id,
+                "project_name": new_tutorial_doc["project_name"],
+                "repo_url": repo_url,
+                "status": "completed",
+                "chat_ready": True,
+                "index_content": new_tutorial_doc["index_content"],
+                "chapters": new_tutorial_doc["chapters"],
+                "graph": new_tutorial_doc["graph"]
+            }
+
+    # 3. Cache miss: trigger indexing + generation pipeline as normal
     tutorial_doc = {
         "username": username,
         "repo_url": repo_url,
@@ -710,7 +834,6 @@ def generate_tutorial(request: GenerateRequest, background_tasks: BackgroundTask
         tutorial_doc["_id"] = doc_id
         db.tutorials.data[doc_id] = tutorial_doc
         
-    # Launch RAG indexing & pocketflow generation in parallel
     background_tasks.add_task(run_background_pipeline, doc_id, repo_url, username)
     
     return {
@@ -779,127 +902,36 @@ Retrieved Code Context:
     })
     
     def generate_response():
-        provider = os.environ.get("LLM_PROVIDER")
-        if not provider and (os.environ.get("GEMINI_PROJECT_ID") or os.environ.get("GEMINI_API_KEY")):
-            provider = "GEMINI"
-
-        if provider == "GEMINI":
-            try:
-                from google import genai
-                if os.environ.get("GEMINI_PROJECT_ID"):
-                    client = genai.Client(
-                        vertexai=True,
-                        project=os.environ.get("GEMINI_PROJECT_ID"),
-                        location=os.environ.get("GEMINI_LOCATION", "us-central1")
-                    )
-                else:
-                    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-                model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
-                
-                contents = []
-                contents.append(f"System Instructions:\n{system_prompt}\n")
-                for msg in messages[:-1]:
-                    contents.append(f"{msg.role}: {msg.content}")
-                contents.append(f"Based on the code context, answer the following question: {user_query}")
-                
-                response_stream = client.models.generate_content_stream(
-                    model=model,
-                    contents=contents
-                )
-                for chunk in response_stream:
-                    if chunk.text:
-                        yield chunk.text
-            except Exception as e:
-                yield f"Error calling Gemini: {e}"
-
-        elif provider:
-            model_var = f"{provider}_MODEL"
-            base_url_var = f"{provider}_BASE_URL"
-            api_key_var = f"{provider}_API_KEY"
-
-            model = os.environ.get(model_var)
-            base_url = os.environ.get(base_url_var)
-            api_key = os.environ.get(api_key_var, "")
-
-            if not model or not base_url:
-                yield f"Error: {model_var} or {base_url_var} is not set."
-                return
-
-            url = f"{base_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Content-Type": "application/json"
-            }
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-
-            openai_messages = [
-                {"role": "system", "content": system_prompt}
-            ]
-            for msg in messages[:-1]:
-                openai_messages.append({"role": msg.role, "content": msg.content})
-            openai_messages.append({
-                "role": "user",
-                "content": f"Based on the code context, answer the following question: {user_query}"
-            })
-
-            payload = {
-                "model": model,
-                "messages": openai_messages,
-                "temperature": 0.3,
+        ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+        if "localhost" in ollama_url:
+            ollama_url = ollama_url.replace("localhost", "127.0.0.1")
+        ollama_model = os.environ.get("OLLAMA_CHAT_MODEL", "mistral")
+        
+        try:
+            r = requests.post(f"{ollama_url}/api/chat", json={
+                "model": ollama_model,
+                "messages": ollama_messages,
                 "stream": True
-            }
-
-            try:
-                r = requests.post(url, headers=headers, json=payload, stream=True, timeout=90)
-                if r.status_code != 200:
-                    yield f"Error calling {provider} API (Status: {r.status_code}, Detail: {r.text})"
-                    return
+            }, stream=True, timeout=90)
+            
+            if r.status_code != 200:
+                yield f"Error calling Ollama (Status: {r.status_code})"
+                return
                 
-                for line in r.iter_lines():
-                    if line:
-                        decoded = line.decode('utf-8').strip()
-                        if decoded.startswith("data: "):
-                            data_str = decoded[6:]
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                data = json.loads(data_str)
-                                token = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                                if token:
-                                    yield token
-                            except:
-                                pass
-            except Exception as e:
-                yield f"Connection Error calling {provider}: {e}"
-        else:
-            ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-            if "localhost" in ollama_url:
-                ollama_url = ollama_url.replace("localhost", "127.0.0.1")
-            try:
-                r = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": "mistral",
-                    "messages": ollama_messages,
-                    "stream": True
-                }, stream=True, timeout=90)
-                
-                if r.status_code != 200:
-                    yield f"Error calling Ollama (Status: {r.status_code})"
-                    return
-                    
-                for line in r.iter_lines():
-                    if line:
-                        decoded = line.decode('utf-8')
-                        try:
-                            data = json.loads(decoded)
-                            token = data.get("message", {}).get("content", "")
-                            if token:
-                                yield token
-                            if data.get("done", False):
-                                break
-                        except:
-                            pass
-            except Exception as e:
-                yield f"Connection Error: Could not connect to locally running Ollama Mistral model on {ollama_url}. Please ensure Ollama is running and has 'mistral' pulled."
+            for line in r.iter_lines():
+                if line:
+                    decoded = line.decode('utf-8')
+                    try:
+                        data = json.loads(decoded)
+                        token = data.get("message", {}).get("content", "")
+                        if token:
+                            yield token
+                        if data.get("done", False):
+                            break
+                    except:
+                        pass
+        except Exception as e:
+            yield f"Connection Error: Could not connect to locally running Ollama model ({ollama_model}) on {ollama_url}. Please ensure Ollama is running and has '{ollama_model}' pulled."
 
     return StreamingResponse(generate_response(), media_type="text/event-stream")
 

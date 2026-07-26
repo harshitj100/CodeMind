@@ -340,7 +340,7 @@ body::-webkit-scrollbar {
     padding: 3rem 2.5rem;
     z-index: 10;
     transition: var(--transition-premium);
-    animation: fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: auth-fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .auth-header {
@@ -502,6 +502,90 @@ body::-webkit-scrollbar {
     padding: 1.5rem 0.75rem;
     flex-shrink: 0;
     z-index: 8;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.history-sidebar.collapsed {
+    width: 72px;
+    padding: 1.5rem 0.5rem;
+}
+
+/* Sidebar Toggle Collapse Button */
+.sidebar-collapse-btn {
+    position: absolute;
+    top: 1rem;
+    right: -12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(18, 22, 32, 0.95);
+    border: 1px solid var(--border-glass);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.sidebar-collapse-btn:hover {
+    color: #ffffff;
+    border-color: var(--accent-purple);
+    transform: scale(1.1);
+}
+
+.history-sidebar.collapsed .new-tutorial-btn span:not(.plus-icon) {
+    display: none;
+}
+
+.history-sidebar.collapsed .new-tutorial-btn {
+    width: 100%;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+}
+
+.history-sidebar.collapsed .history-title {
+    opacity: 0;
+    visibility: hidden;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.history-sidebar.collapsed .history-item .history-label {
+    display: none;
+}
+
+.history-sidebar.collapsed .history-item .delete-history-btn {
+    display: none;
+}
+
+.history-sidebar.collapsed .history-item {
+    justify-content: center;
+    padding: 0.75rem 0;
+}
+
+.history-sidebar.collapsed .user-profile-card {
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+    align-items: center;
+}
+
+.history-sidebar.collapsed .user-details {
+    justify-content: center;
+}
+
+.history-sidebar.collapsed .user-username {
+    display: none;
+}
+
+.history-sidebar.collapsed .logout-btn {
+    margin: 0;
 }
 
 .new-tutorial-btn {
@@ -583,10 +667,7 @@ body::-webkit-scrollbar {
 }
 
 .history-item::before {
-    content: "📁";
-    font-size: 0.85rem;
-    opacity: 0.5;
-    flex-shrink: 0;
+    display: none;
 }
 
 .history-label {
@@ -766,6 +847,17 @@ body::-webkit-scrollbar {
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes auth-fade-in-up {
+    from {
+        opacity: 0;
+        transform: translate(-50%, calc(-50% + 20px));
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
     }
 }
 
@@ -1371,5 +1463,27 @@ body::-webkit-scrollbar {
     
     .viewer-panel {
         padding: 1.5rem;
+    }
+}
+
+/* --- Click Ripple Effect --- */
+.click-ripple {
+    position: fixed;
+    border: 2px solid var(--accent-purple);
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.12);
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(0);
+    animation: ripple-effect 0.5s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+    z-index: 99999;
+    width: 40px;
+    height: 40px;
+}
+
+@keyframes ripple-effect {
+    to {
+        transform: translate(-50%, -50%) scale(2.8);
+        opacity: 0;
+        border-color: var(--accent-pink);
     }
 }

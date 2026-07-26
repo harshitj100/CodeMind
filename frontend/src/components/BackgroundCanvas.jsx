@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react'
 
-export default function BackgroundCanvas({ viewMode, theme }) {
+export default function BackgroundCanvas({ viewMode }) {
   const canvasRef = useRef(null)
 
   useEffect(() => {
@@ -53,8 +53,7 @@ export default function BackgroundCanvas({ viewMode, theme }) {
       draw() {
         ctx.beginPath()
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
-        const color = theme === 'light' ? `rgba(139, 92, 246, ${this.alpha})` : `rgba(255, 255, 255, ${this.alpha})`
-        ctx.fillStyle = color
+        ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`
         ctx.fill()
       }
     }
@@ -64,11 +63,11 @@ export default function BackgroundCanvas({ viewMode, theme }) {
       constructor(x, y) {
         this.x = x
         this.y = y
-        this.size = Math.random() * 2.5 + 0.6
-        this.vx = (Math.random() - 0.5) * 0.8
-        this.vy = (Math.random() - 0.5) * 0.8
-        this.alpha = 0.85
-        this.decay = Math.random() * 0.015 + 0.012
+        this.size = Math.random() * 2.8 + 0.8
+        this.vx = (Math.random() - 0.5) * 1.6
+        this.vy = (Math.random() - 0.5) * 1.6
+        this.alpha = 0.95
+        this.decay = Math.random() * 0.018 + 0.012
         this.color = themeColors[Math.floor(Math.random() * themeColors.length)]
       }
       update() {
@@ -139,7 +138,7 @@ export default function BackgroundCanvas({ viewMode, theme }) {
       particles.push(new Particle())
     }
 
-    // Mouse Listeners
+    // Mouse & Click Listeners
     const handleMouseMove = (e) => {
       mouse.x = e.clientX
       mouse.y = e.clientY
@@ -164,8 +163,16 @@ export default function BackgroundCanvas({ viewMode, theme }) {
       mouse.y = null
     }
 
+    const handleWindowClick = (e) => {
+      // Spawn a burst of space sparkles on any click
+      for (let i = 0; i < 15; i++) {
+        trailParticles.push(new TrailParticle(e.clientX, e.clientY))
+      }
+    }
+
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseleave', handleMouseLeave)
+    window.addEventListener('click', handleWindowClick)
 
     // Animation Loop
     const render = () => {
@@ -177,14 +184,14 @@ export default function BackgroundCanvas({ viewMode, theme }) {
         blob.draw()
       })
 
-      // 2. Parallax Lerp
+      // 3. Parallax Lerp
       mouse.rx += (mouse.targetX - mouse.rx) * 0.08
       mouse.ry += (mouse.targetY - mouse.ry) * 0.08
 
       ctx.save()
       ctx.translate(mouse.rx, mouse.ry)
 
-      // 3. Connect lines
+      // 4. Connect lines
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x
@@ -196,16 +203,14 @@ export default function BackgroundCanvas({ viewMode, theme }) {
             ctx.beginPath()
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = theme === 'light' 
-              ? `rgba(99, 102, 241, ${alpha * 1.5})` 
-              : `rgba(139, 92, 246, ${alpha})`
+            ctx.strokeStyle = `rgba(139, 92, 246, ${alpha})`
             ctx.lineWidth = 0.5
             ctx.stroke()
           }
         }
       }
 
-      // 4. Draw/Update particles
+      // 5. Draw/Update particles
       particles.forEach(p => {
         p.update()
         p.draw()
@@ -213,7 +218,7 @@ export default function BackgroundCanvas({ viewMode, theme }) {
 
       ctx.restore()
 
-      // 5. Draw mouse sparkles
+      // 6. Draw mouse sparkles
       for (let i = trailParticles.length - 1; i >= 0; i--) {
         const tp = trailParticles[i]
         tp.update()
@@ -234,9 +239,10 @@ export default function BackgroundCanvas({ viewMode, theme }) {
       window.removeEventListener('resize', handleResize)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseleave', handleMouseLeave)
+      window.removeEventListener('click', handleWindowClick)
       cancelAnimationFrame(animationFrameId)
     }
-  }, [viewMode, theme])
+  }, [viewMode])
 
   return <canvas ref={canvasRef} id="bg-canvas" />
 }

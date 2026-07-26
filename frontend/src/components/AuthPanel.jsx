@@ -60,7 +60,11 @@ export default function AuthPanel({ onAuthSuccess }) {
   return (
     <div id="auth-panel" className="auth-panel glass-panel">
       <div className="auth-header">
-        <span className="auth-logo">⚡</span>
+        <span className="auth-logo" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent-purple)', filter: 'drop-shadow(0 2px 8px rgba(139, 92, 246, 0.4))' }}>
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </span>
         <h2>CodeBase Tutorial Builder</h2>
       </div>
 

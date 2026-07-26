@@ -173,14 +173,55 @@ export default function Workspace({ tutorial, onBack }) {
           padding: '3px'
         }}>
           {[
-            { id: 'tutorial', label: '📖 Tutorial' },
-            { id: 'graph', label: '🕸 Repository Graph' },
-            { id: 'chat', label: activeTutorial.chat_ready ? '💬 Chat' : '💬 Chat 🔒' }
+            { 
+              id: 'tutorial', 
+              label: 'Tutorial', 
+              icon: (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6.5px', display: 'inline-block', verticalAlign: 'middle' }}>
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                </svg>
+              )
+            },
+            { 
+              id: 'graph', 
+              label: 'Repository Graph', 
+              icon: (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '6.5px', display: 'inline-block', verticalAlign: 'middle' }}>
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <circle cx="6" cy="6" r="3"></circle>
+                  <circle cx="18" cy="6" r="3"></circle>
+                  <circle cx="18" cy="18" r="3"></circle>
+                  <line x1="12" y1="12" x2="6" y2="6"></line>
+                  <line x1="12" y1="12" x2="18" y2="6"></line>
+                  <line x1="12" y1="12" x2="18" y2="18"></line>
+                </svg>
+              )
+            },
+            { 
+              id: 'chat', 
+              label: activeTutorial.chat_ready ? 'Chat' : 'Chat (Locked)', 
+              icon: (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', marginRight: '6.5px', verticalAlign: 'middle' }}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  {!activeTutorial.chat_ready && (
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                  )}
+                </div>
+              )
+            }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               style={{
+                display: 'flex',
+                alignItems: 'center',
                 background: activeTab === tab.id ? 'rgba(255, 255, 255, 0.08)' : 'none',
                 border: 'none',
                 outline: 'none',
@@ -194,7 +235,8 @@ export default function Workspace({ tutorial, onBack }) {
                 transition: 'var(--transition-fast)'
               }}
             >
-              {tab.label}
+              {tab.icon}
+              <span>{tab.label}</span>
             </button>
           ))}
         </div>
@@ -221,8 +263,14 @@ export default function Workspace({ tutorial, onBack }) {
                   <li 
                     className={`chapter-item ${selectedChapterKey === 'overview' ? 'active' : ''}`}
                     onClick={() => handleSelectChapter('overview')}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                   >
-                    <span className="chapter-number">🏠</span> Overview
+                    <span className="chapter-number" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.85 }}>
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                      </svg>
+                    </span> Overview
                   </li>
                   {(activeTutorial.chapters || []).map((chapter, idx) => (
                     <li 
@@ -297,7 +345,10 @@ export default function Workspace({ tutorial, onBack }) {
             <ChatSection tutorial={activeTutorial} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1.2rem', padding: '2rem' }}>
-              <span style={{ fontSize: '2.5rem', animation: 'pulse-lock 1.5s infinite alternate' }}>🔒</span>
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'pulse-lock 1.5s infinite alternate', color: 'var(--accent-purple)', filter: 'drop-shadow(0 2px 10px rgba(139, 92, 246, 0.4))' }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
               <h3 style={{ color: '#FFFFFF', fontWeight: '500' }}>Vector Indexing in Progress</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', textAlign: 'center', maxWidth: '420px', lineHeight: '1.5' }}>
                 The Chat assistant is currently locked while Tree-sitter builds semantic code chunks and stores them in MongoDB Atlas Vector Search.
