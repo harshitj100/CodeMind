@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
 import InteractiveDiagram from './InteractiveDiagram'
+import RepositoryGraph from './RepositoryGraph'
+import ChatSection from './ChatSection'
 
 export default function Workspace({ tutorial, onBack }) {
+  const [activeTab, setActiveTab] = useState('tutorial') // 'tutorial' | 'graph' | 'chat'
   const [selectedChapterKey, setSelectedChapterKey] = useState('overview')
   const [viewOpacity, setViewOpacity] = useState(1)
   const contentPanelRef = useRef(null)
@@ -15,6 +18,12 @@ export default function Workspace({ tutorial, onBack }) {
         contentPanelRef.current.scrollTop = 0
       }
     }, 250)
+  }
+
+  // Jump from Repository Graph node directly to a specific tutorial chapter
+  const handleOpenChapter = (chapterIdx) => {
+    setActiveTab('tutorial')
+    handleSelectChapter(chapterIdx)
   }
 
   const stripFooter = (content) => {
@@ -33,20 +42,22 @@ export default function Workspace({ tutorial, onBack }) {
 
   // Trigger highlight & mermaid updates
   useEffect(() => {
-    if (window.Prism && contentPanelRef.current) {
-      window.Prism.highlightAllUnder(contentPanelRef.current)
-    }
-    if (window.mermaid && contentPanelRef.current) {
-      const mermaidElements = contentPanelRef.current.querySelectorAll('.mermaid')
-      if (mermaidElements.length > 0) {
-        try {
-          window.mermaid.run()
-        } catch (err) {
-          console.error("Mermaid generation error:", err)
+    if (activeTab === 'tutorial') {
+      if (window.Prism && contentPanelRef.current) {
+        window.Prism.highlightAllUnder(contentPanelRef.current)
+      }
+      if (window.mermaid && contentPanelRef.current) {
+        const mermaidElements = contentPanelRef.current.querySelectorAll('.mermaid')
+        if (mermaidElements.length > 0) {
+          try {
+            window.mermaid.run()
+          } catch (err) {
+            console.error("Mermaid generation error:", err)
+          }
         }
       }
     }
-  }, [selectedChapterKey, tutorial])
+  }, [selectedChapterKey, tutorial, activeTab])
 
   // Parse markdown segments and insert InteractiveDiagram components
   const renderContentSegments = () => {
@@ -99,8 +110,10 @@ export default function Workspace({ tutorial, onBack }) {
   }
 
   return (
-    <div id="workspace" className="workspace">
-      <div className="workspace-header">
+    <div id="workspace" className="workspace" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '1.2rem' }}>
+      
+      {/* Workspace Header Tab Bar */}
+      <div className="workspace-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
         <button className="back-btn" onClick={onBack}>
           <svg viewBox="0 0 24 24" width="18" height="18">
             <line x1="19" y1="12" x2="5" y2="12"></line>
@@ -108,39 +121,96 @@ export default function Workspace({ tutorial, onBack }) {
           </svg>
           <span>Back to Home</span>
         </button>
+
+        {/* View Selection Tabs */}
+        <div style={{
+          display: 'flex',
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+          borderRadius: '30px',
+          padding: '3px'
+        }}>
+          {[
+            { id: 'tutorial', label: '📖 Tutorial' },
+            { id: 'graph', label: '🕸 Repository Graph' },
+            { id: 'chat', label: '💬 Chat' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                background: activeTab === tab.id ? 'rgba(255, 255, 255, 0.08)' : 'none',
+                border: 'none',
+                outline: 'none',
+                color: activeTab === tab.id ? '#FFFFFF' : 'var(--text-muted)',
+                fontFamily: 'inherit',
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                padding: '0.5rem 1.2rem',
+                borderRadius: '25px',
+                cursor: 'pointer',
+                transition: 'var(--transition-fast)'
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ width: '120px' }}></div> {/* Spacer to balance header */}
       </div>
 
-      <aside className="sidebar glass-panel">
-        <h2 className="sidebar-title">{tutorial.project_name}</h2>
-        <ul className="chapter-list">
-          <li 
-            className={`chapter-item ${selectedChapterKey === 'overview' ? 'active' : ''}`}
-            onClick={() => handleSelectChapter('overview')}
-          >
-            <span className="chapter-number">🏠</span> Overview
-          </li>
-          {tutorial.chapters.map((chapter, idx) => (
-            <li 
-              key={idx}
-              className={`chapter-item ${selectedChapterKey === idx ? 'active' : ''}`}
-              onClick={() => handleSelectChapter(idx)}
-            >
-              <span className="chapter-number">{String(idx + 1).padStart(2, '0')}</span> 
-              {cleanTitle(chapter.title)}
-            </li>
-          ))}
-        </ul>
-      </aside>
+      {/* Main Tab Views Switcher */}
+      <div style={{ flexGrow: 1, position: 'relative' }}>
+        {activeTab === 'tutorial' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '290px 1fr', gap: '2rem', height: '100%' }}>
+            
+            {/* Left chapters navigation sidebar */}
+            <aside className="sidebar glass-panel" style={{ height: 'calc(100vh - 10rem)', top: '0', position: 'relative' }}>
+              <h2 className="sidebar-title">{tutorial.project_name}</h2>
+              <ul className="chapter-list">
+                <li 
+                  className={`chapter-item ${selectedChapterKey === 'overview' ? 'active' : ''}`}
+                  onClick={() => handleSelectChapter('overview')}
+                >
+                  <span className="chapter-number">🏠</span> Overview
+                </li>
+                {tutorial.chapters.map((chapter, idx) => (
+                  <li 
+                    key={idx}
+                    className={`chapter-item ${selectedChapterKey === idx ? 'active' : ''}`}
+                    onClick={() => handleSelectChapter(idx)}
+                  >
+                    <span className="chapter-number">{String(idx + 1).padStart(2, '0')}</span> 
+                    {cleanTitle(chapter.title)}
+                  </li>
+                ))}
+              </ul>
+            </aside>
 
-      <main 
-        ref={contentPanelRef} 
-        className="viewer-panel glass-panel"
-        style={{ opacity: viewOpacity, transition: 'opacity 0.25s ease-in-out' }}
-      >
-        <div className="markdown-body">
-          {renderContentSegments()}
-        </div>
-      </main>
+            {/* Right main viewer panel */}
+            <main 
+              ref={contentPanelRef} 
+              className="viewer-panel glass-panel"
+              style={{ opacity: viewOpacity, transition: 'opacity 0.25s ease-in-out', height: 'calc(100vh - 10rem)', margin: 0 }}
+            >
+              <div className="markdown-body">
+                {renderContentSegments()}
+              </div>
+            </main>
+          </div>
+        )}
+
+        {activeTab === 'graph' && (
+          <RepositoryGraph 
+            graphData={tutorial.graph} 
+            onOpenChapter={handleOpenChapter} 
+          />
+        )}
+
+        {activeTab === 'chat' && (
+          <ChatSection tutorial={tutorial} />
+        )}
+      </div>
     </div>
   )
 }

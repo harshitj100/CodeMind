@@ -10,8 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dagre": "^0.8.5",
+    "framer-motion": "^12.42.2",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
