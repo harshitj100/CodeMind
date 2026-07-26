@@ -9,14 +9,15 @@ import Workspace from './components/Workspace'
 export default function App() {
   const [username, setUsername] = useState(null)
   const [viewMode, setViewMode] = useState('auth') // 'auth' | 'landing' | 'loading' | 'workspace'
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark') // 'dark' | 'light'
   const [history, setHistory] = useState([])
   const [activeTutorial, setActiveTutorial] = useState(null)
   const [loadingRepo, setLoadingRepo] = useState('')
 
-  // 1. Sync React viewMode with document.body.className for stylesheet states
+  // 1. Sync React viewMode and theme with document.body.className for stylesheet states
   useEffect(() => {
-    document.body.className = `mode-${viewMode}`
-  }, [viewMode])
+    document.body.className = `mode-${viewMode} theme-${theme}`
+  }, [viewMode, theme])
 
   // 2. Check local session cache on startup
   useEffect(() => {
@@ -29,6 +30,12 @@ export default function App() {
       setViewMode('auth')
     }
   }, [])
+
+  const handleToggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(nextTheme)
+    localStorage.setItem('theme', nextTheme)
+  }
 
   // 3. Fetch user history from MongoDB
   const fetchHistory = async (user) => {
@@ -138,7 +145,7 @@ export default function App() {
   return (
     <>
       {/* 2D Particles & Star constellations background canvas */}
-      <BackgroundCanvas viewMode={viewMode} />
+      <BackgroundCanvas viewMode={viewMode} theme={theme} />
 
       {/* Volumetric HSL Edge Glows */}
       <div className="glow-orb glow-orb-1"></div>
@@ -158,6 +165,8 @@ export default function App() {
             onDelete={handleDeleteTutorial}
             onNewClick={handleGoHome}
             onLogout={handleLogout}
+            theme={theme}
+            onToggleTheme={handleToggleTheme}
           />
 
           {/* Right Side Main Stage */}

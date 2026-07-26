@@ -4,6 +4,10 @@ import logging
 import json
 import requests
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 log_directory = os.getenv("LOG_DIR", "logs")

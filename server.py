@@ -2,8 +2,8 @@ import os
 import time
 import re
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import bcrypt
@@ -11,6 +11,15 @@ from pymongo import MongoClient
 from bson import ObjectId
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
+import json
+import requests
+
+from utils.rag_pipeline import (
+    clone_repository,
+    index_repository_rag,
+    retrieve_relevant_chunks,
+    rerank_chunks
+)
 
 # Load environment variables from .env file before any database configurations
 load_dotenv()
@@ -186,6 +195,8 @@ def get_tutorial_details(tutorial_id: str):
         "success": True,
         "project_name": tutorial.get("project_name", "sample-project"),
         "repo_url": tutorial.get("repo_url", ""),
+        "status": tutorial.get("status", "completed"),
+        "chat_ready": tutorial.get("chat_ready", True),
         "index_content": tutorial.get("index_content", ""),
         "chapters": tutorial.get("chapters", []),
         "graph": graph_data
@@ -432,7 +443,7 @@ def generate_repository_graph(project_name: str, repo_url: str, local_dir: str =
     
     nodes = []
     edges = []
-    target_path = local_dir or os.path.join("temp_repos", project_name)
+    target_path = local_dir or os.path.join("venv", "temp_repos", project_name)
     if not os.path.exists(target_path):
         target_path = "." # Fallback
         
@@ -547,35 +558,69 @@ def read_root():
         raise HTTPException(status_code=404, detail="index.html not found.")
     return FileResponse(index_path)
 
-@app.post("/api/generate")
-def generate_tutorial(request: GenerateRequest):
+def run_background_pipeline(doc_id: str, repo_url: str, username: str):
     """
-    Simulates generation workflow, reads pre-generated mock data, 
-    and saves the resulting payload to MongoDB under the user's account.
+    Background worker running RAG indexing (Tree-sitter parse + embeddings) in parallel,
+    updating status when chat is ready, and calling existing tutorial generator.
     """
-    repo_url = request.repo_url.strip()
-    username = request.username.strip().lower()
-    
-    if not repo_url:
-        raise HTTPException(status_code=400, detail="Repository URL cannot be empty.")
-    if not username:
-        raise HTTPException(status_code=400, detail="User session not found. Please log in.")
-        
-    time.sleep(2.5)
-    
-    output_dir = os.path.join("output", "sample-project")
-    if not os.path.exists(output_dir):
-        raise HTTPException(status_code=500, detail="Tutorial source directory 'output/sample-project' not found.")
-    
-    index_file = os.path.join(output_dir, "index.md")
-    if not os.path.exists(index_file):
-        raise HTTPException(status_code=500, detail="Index file 'index.md' not found in sample-project.")
-    
-    with open(index_file, "r", encoding="utf-8") as f:
-        index_content = f.read()
-        
-    chapters = []
     try:
+        dest_dir = os.path.join("venv", "temp_repos", doc_id)
+        # 1. Clone repository
+        clone_repository(repo_url, dest_dir)
+        
+        # 2. Run RAG Indexing Pipeline (AST parses code semantically and embeds chunks)
+        index_repository_rag(doc_id, dest_dir)
+        
+        # Chat is now ready! Update status in DB
+        if not db_fallback:
+            db.tutorials.update_one(
+                {"_id": ObjectId(doc_id)},
+                {"$set": {"chat_ready": True, "status": "generating"}}
+            )
+        else:
+            db.tutorials.data[doc_id]["chat_ready"] = True
+            db.tutorials.data[doc_id]["status"] = "generating"
+            
+        # 3. Run the actual PocketFlow tutorial generator pipeline
+        from flow import create_tutorial_flow
+        from main import DEFAULT_INCLUDE_PATTERNS, DEFAULT_EXCLUDE_PATTERNS
+        
+        # Initialize the shared dictionary
+        shared_flow_data = {
+            "repo_url": None, # Force crawling from local directory
+            "local_dir": dest_dir, # Target the cloned directory
+            "project_name": "sample-project", # Write to sample-project output folder
+            "github_token": None,
+            "output_dir": "output",
+
+            "include_patterns": DEFAULT_INCLUDE_PATTERNS,
+            "exclude_patterns": DEFAULT_EXCLUDE_PATTERNS,
+            "max_file_size": 100000,
+            "language": "english",
+            "use_cache": True,
+            "max_abstraction_num": 10,
+
+            # Outputs populated by nodes
+            "files": [],
+            "abstractions": [],
+            "relationships": {},
+            "chapter_order": [],
+            "chapters": [],
+            "final_output_dir": None
+        }
+        
+        tutorial_flow = create_tutorial_flow()
+        tutorial_flow.run(shared_flow_data)
+        
+        output_dir = shared_flow_data.get("final_output_dir") or os.path.join("output", "sample-project")
+        if not os.path.exists(output_dir):
+            raise Exception(f"Tutorial source directory '{output_dir}' not found.")
+            
+        index_file = os.path.join(output_dir, "index.md")
+        with open(index_file, "r", encoding="utf-8") as f:
+            index_content = f.read()
+            
+        chapters = []
         filenames = os.listdir(output_dir)
         md_filenames = [f for f in filenames if f.endswith(".md") and f != "index.md"]
         md_filenames.sort()
@@ -597,34 +642,267 @@ def generate_tutorial(request: GenerateRequest):
                 "content": content
             })
             
+        graph_data = generate_repository_graph("sample-project", repo_url, dest_dir)
+        
+        # Complete tutorial generation
+        if not db_fallback:
+            db.tutorials.update_one(
+                {"_id": ObjectId(doc_id)},
+                {"$set": {
+                    "status": "completed",
+                    "index_content": index_content,
+                    "chapters": chapters,
+                    "graph": graph_data
+                }}
+            )
+        else:
+            db.tutorials.data[doc_id]["status"] = "completed"
+            db.tutorials.data[doc_id]["index_content"] = index_content
+            db.tutorials.data[doc_id]["chapters"] = chapters
+            db.tutorials.data[doc_id]["graph"] = graph_data
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading chapters: {str(e)}")
+        print(f"Error in background pipeline: {e}")
+        if not db_fallback:
+            try:
+                db.tutorials.update_one(
+                    {"_id": ObjectId(doc_id)},
+                    {"$set": {"status": "failed", "error": str(e)}}
+                )
+            except:
+                pass
+        else:
+            db.tutorials.data[doc_id]["status"] = "failed"
+            db.tutorials.data[doc_id]["error"] = str(e)
+
+@app.post("/api/generate")
+def generate_tutorial(request: GenerateRequest, background_tasks: BackgroundTasks):
+    """
+    Triggers parallel RAG indexing + tutorial generation pipeline in the background.
+    Returns immediately with indexing status.
+    """
+    repo_url = request.repo_url.strip()
+    username = request.username.strip().lower()
     
-    # Save the generated tutorial to MongoDB (or mock)
-    graph_data = generate_repository_graph("sample-project", repo_url)
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="Repository URL cannot be empty.")
+    if not username:
+        raise HTTPException(status_code=400, detail="User session not found. Please log in.")
+        
     tutorial_doc = {
         "username": username,
         "repo_url": repo_url,
         "project_name": "sample-project",
-        "index_content": index_content,
-        "chapters": chapters,
-        "graph": graph_data,
+        "status": "indexing",
+        "chat_ready": False,
+        "index_content": "",
+        "chapters": [],
+        "graph": None,
         "created_at": datetime.utcnow()
     }
     
-    result = db.tutorials.insert_one(tutorial_doc)
-    doc_id = str(result.inserted_id)
+    if not db_fallback:
+        result = db.tutorials.insert_one(tutorial_doc)
+        doc_id = str(result.inserted_id)
+    else:
+        import uuid
+        doc_id = str(uuid.uuid4())
+        tutorial_doc["_id"] = doc_id
+        db.tutorials.data[doc_id] = tutorial_doc
         
+    # Launch RAG indexing & pocketflow generation in parallel
+    background_tasks.add_task(run_background_pipeline, doc_id, repo_url, username)
+    
     return {
         "success": True,
         "id": doc_id,
         "project_name": "sample-project",
         "repo_url": repo_url,
-        "index_content": index_content,
-        "chapters": chapters,
-        "graph": graph_data
+        "status": "indexing",
+        "chat_ready": False
     }
+
+# --- RAG Chat Models and Route ---
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    repo_id: str
+    messages: list[ChatMessage]
+
+@app.post("/api/chat/stream")
+def chat_stream(request: ChatRequest):
+    """
+    Streaming repository-aware assistant chat endpoint querying MongoDB Atlas vector indices,
+    applying hyrid overlap density rerankers, and prompting local Ollama Mistral model.
+    """
+    repo_id = request.repo_id
+    messages = request.messages
+    
+    if not messages:
+        raise HTTPException(status_code=400, detail="Conversation message list cannot be empty.")
+        
+    user_query = messages[-1].content
+    
+    # 1. Query vector store for top 25 chunks
+    retrieved = retrieve_relevant_chunks(repo_id, user_query, limit=25)
+    
+    # 2. Rerank to top 6 chunks
+    reranked = rerank_chunks(user_query, retrieved, top_k=6)
+    
+    # 3. Assemble prompt injection context
+    context_str = ""
+    for idx, c in enumerate(reranked):
+        context_str += f"\n[File: {c['path']} | Node Type: {c['type']} | Lines: {c['metadata']['start_line']}-{c['metadata']['end_line']}]\n{c['content']}\n"
+        
+    system_prompt = f"""You are a repository-aware codebase assistant. You answer questions about the codebase structure using the following retrieved code context.
+Ensure your answers are accurate and directly reference the retrieved files and line ranges.
+Format your responses with clear bullet points and markdown code block highlighting.
+If you cannot find the answer in the retrieved context, state that clearly.
+Do NOT make up information.
+
+Retrieved Code Context:
+{context_str}
+"""
+    
+    # 4. Build chat payloads for Ollama Mistral
+    ollama_messages = [
+        {"role": "system", "content": system_prompt}
+    ]
+    for msg in messages[:-1]:
+        ollama_messages.append({"role": msg.role, "content": msg.content})
+        
+    ollama_messages.append({
+        "role": "user",
+        "content": f"Based on the code context, answer the following question: {user_query}"
+    })
+    
+    def generate_response():
+        provider = os.environ.get("LLM_PROVIDER")
+        if not provider and (os.environ.get("GEMINI_PROJECT_ID") or os.environ.get("GEMINI_API_KEY")):
+            provider = "GEMINI"
+
+        if provider == "GEMINI":
+            try:
+                from google import genai
+                if os.environ.get("GEMINI_PROJECT_ID"):
+                    client = genai.Client(
+                        vertexai=True,
+                        project=os.environ.get("GEMINI_PROJECT_ID"),
+                        location=os.environ.get("GEMINI_LOCATION", "us-central1")
+                    )
+                else:
+                    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+                model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
+                
+                contents = []
+                contents.append(f"System Instructions:\n{system_prompt}\n")
+                for msg in messages[:-1]:
+                    contents.append(f"{msg.role}: {msg.content}")
+                contents.append(f"Based on the code context, answer the following question: {user_query}")
+                
+                response_stream = client.models.generate_content_stream(
+                    model=model,
+                    contents=contents
+                )
+                for chunk in response_stream:
+                    if chunk.text:
+                        yield chunk.text
+            except Exception as e:
+                yield f"Error calling Gemini: {e}"
+
+        elif provider:
+            model_var = f"{provider}_MODEL"
+            base_url_var = f"{provider}_BASE_URL"
+            api_key_var = f"{provider}_API_KEY"
+
+            model = os.environ.get(model_var)
+            base_url = os.environ.get(base_url_var)
+            api_key = os.environ.get(api_key_var, "")
+
+            if not model or not base_url:
+                yield f"Error: {model_var} or {base_url_var} is not set."
+                return
+
+            url = f"{base_url.rstrip('/')}/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            openai_messages = [
+                {"role": "system", "content": system_prompt}
+            ]
+            for msg in messages[:-1]:
+                openai_messages.append({"role": msg.role, "content": msg.content})
+            openai_messages.append({
+                "role": "user",
+                "content": f"Based on the code context, answer the following question: {user_query}"
+            })
+
+            payload = {
+                "model": model,
+                "messages": openai_messages,
+                "temperature": 0.3,
+                "stream": True
+            }
+
+            try:
+                r = requests.post(url, headers=headers, json=payload, stream=True, timeout=90)
+                if r.status_code != 200:
+                    yield f"Error calling {provider} API (Status: {r.status_code}, Detail: {r.text})"
+                    return
+                
+                for line in r.iter_lines():
+                    if line:
+                        decoded = line.decode('utf-8').strip()
+                        if decoded.startswith("data: "):
+                            data_str = decoded[6:]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                                token = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                if token:
+                                    yield token
+                            except:
+                                pass
+            except Exception as e:
+                yield f"Connection Error calling {provider}: {e}"
+        else:
+            ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+            if "localhost" in ollama_url:
+                ollama_url = ollama_url.replace("localhost", "127.0.0.1")
+            try:
+                r = requests.post(f"{ollama_url}/api/chat", json={
+                    "model": "mistral",
+                    "messages": ollama_messages,
+                    "stream": True
+                }, stream=True, timeout=90)
+                
+                if r.status_code != 200:
+                    yield f"Error calling Ollama (Status: {r.status_code})"
+                    return
+                    
+                for line in r.iter_lines():
+                    if line:
+                        decoded = line.decode('utf-8')
+                        try:
+                            data = json.loads(decoded)
+                            token = data.get("message", {}).get("content", "")
+                            if token:
+                                yield token
+                            if data.get("done", False):
+                                break
+                        except:
+                            pass
+            except Exception as e:
+                yield f"Connection Error: Could not connect to locally running Ollama Mistral model on {ollama_url}. Please ensure Ollama is running and has 'mistral' pulled."
+
+    return StreamingResponse(generate_response(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True, reload_excludes=[".temp_repos", ".temp_repos/*", "temp_repos", "temp_repos/*"])

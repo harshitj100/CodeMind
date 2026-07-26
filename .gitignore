@@ -110,3 +110,4 @@ docs/design-cn.md
 
 # Local temp repos
 temp_repos/
+.temp_repos/

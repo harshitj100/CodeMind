@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react'
 
-export default function BackgroundCanvas({ viewMode }) {
+export default function BackgroundCanvas({ viewMode, theme }) {
   const canvasRef = useRef(null)
 
   useEffect(() => {
@@ -53,7 +53,8 @@ export default function BackgroundCanvas({ viewMode }) {
       draw() {
         ctx.beginPath()
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`
+        const color = theme === 'light' ? `rgba(139, 92, 246, ${this.alpha})` : `rgba(255, 255, 255, ${this.alpha})`
+        ctx.fillStyle = color
         ctx.fill()
       }
     }
@@ -195,7 +196,9 @@ export default function BackgroundCanvas({ viewMode }) {
             ctx.beginPath()
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(139, 92, 246, ${alpha})`
+            ctx.strokeStyle = theme === 'light' 
+              ? `rgba(99, 102, 241, ${alpha * 1.5})` 
+              : `rgba(139, 92, 246, ${alpha})`
             ctx.lineWidth = 0.5
             ctx.stroke()
           }
@@ -233,7 +236,7 @@ export default function BackgroundCanvas({ viewMode }) {
       window.removeEventListener('mouseleave', handleMouseLeave)
       cancelAnimationFrame(animationFrameId)
     }
-  }, [viewMode])
+  }, [viewMode, theme])
 
   return <canvas ref={canvasRef} id="bg-canvas" />
 }

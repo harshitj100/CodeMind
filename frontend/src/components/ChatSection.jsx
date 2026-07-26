@@ -6,7 +6,9 @@ export default function ChatSection({ tutorial }) {
     {
       id: 1,
       sender: 'assistant',
-      text: `Hello! I'm your Codebase Assistant. I have analyzed the architecture of **${tutorial.project_name || 'this project'}**. Ask me anything about its design, file structures, dependencies, or class structures!`
+      text: `Hello! I'm your RAG-based Codebase Assistant. I have indexed **${tutorial.project_name || 'this repository'}** using Tree-sitter and created semantic vector embeddings inside MongoDB Atlas.
+
+Ask me questions about modules, specific functions, classes, or design flow, and I'll retrieve relevant code blocks to guide you!`
     }
   ])
   const [inputText, setInputText] = useState('')
@@ -14,15 +16,67 @@ export default function ChatSection({ tutorial }) {
   const chatEndRef = useRef(null)
 
   const suggestions = [
-    "Explain the codebase application flow",
-    "How does User Authentication work?",
-    "Where is the database session connection established?",
-    "Summarize the relationship between Catalog and Cart"
+    "Explain the codebase structure and logical modules",
+    "Where is User Authentication defined and how does it verify passwords?",
+    "Show the MongoDB database connection details",
+    "Explain how checkout and order processing is structured"
   ]
 
+  // Dynamic layout hooks to scroll, highlight, and inject Copy buttons into code blocks
   useEffect(() => {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+
+    if (window.Prism && chatEndRef.current) {
+      const container = chatEndRef.current.parentElement
+      if (container) {
+        window.Prism.highlightAllUnder(container)
+      }
+    }
+
+    // Append absolute Copy buttons to all pre elements
+    if (chatEndRef.current) {
+      const container = chatEndRef.current.parentElement
+      if (container) {
+        const preElements = container.querySelectorAll('pre')
+        preElements.forEach(pre => {
+          if (pre.querySelector('.copy-code-btn')) return
+
+          const btn = document.createElement('button')
+          btn.className = 'copy-code-btn'
+          btn.innerText = 'Copy'
+          btn.style.position = 'absolute'
+          btn.style.top = '6px'
+          btn.style.right = '6px'
+          btn.style.padding = '3px 8px'
+          btn.style.fontSize = '0.72rem'
+          btn.style.background = 'rgba(255, 255, 255, 0.05)'
+          btn.style.border = '1px solid var(--border-glass)'
+          btn.style.borderRadius = '6px'
+          btn.style.color = 'var(--text-muted)'
+          btn.style.cursor = 'pointer'
+          btn.style.zIndex = '5'
+          btn.style.transition = 'var(--transition-fast)'
+
+          pre.style.position = 'relative'
+          pre.appendChild(btn)
+
+          btn.onclick = () => {
+            const code = pre.querySelector('code')
+            const textToCopy = code ? code.innerText : pre.innerText.replace('Copy', '')
+            navigator.clipboard.writeText(textToCopy)
+            btn.innerText = 'Copied!'
+            btn.style.borderColor = 'var(--accent-purple)'
+            btn.style.color = '#FFFFFF'
+            setTimeout(() => {
+              btn.innerText = 'Copy'
+              btn.style.borderColor = 'var(--border-glass)'
+              btn.style.color = 'var(--text-muted)'
+            }, 2000)
+          }
+        })
+      }
     }
   }, [messages, isTyping])
 
@@ -39,42 +93,62 @@ export default function ChatSection({ tutorial }) {
     setInputText('')
     setIsTyping(true)
 
-    // Simulate AI response based on questions
-    setTimeout(() => {
-      let reply = ""
-      const q = text.toLowerCase()
+    try {
+      // Build history payload formatted for Ollama Mistral prompt
+      const conversationHistory = [
+        ...messages.map(m => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.text
+        })),
+        { role: 'user', content: text }
+      ]
 
-      if (q.includes("flow") || q.includes("architecture") || q.includes("structure")) {
-        reply = `The architecture of **${tutorial.project_name}** splits operations into distinct modules under \`src/\`. The main entry points coordinate authentication (\`auth.py\`), catalog management (\`catalog.py\`), cart state (\`cart.py\`), and final checkouts (\`orders.py\`). All configuration client setups interface with \`db/connection.py\` which instantiates a MongoDB client session.`
-      } else if (q.includes("auth") || q.includes("user") || q.includes("login")) {
-        reply = `**User Authentication** is handled inside \`src/auth/auth.py\`. It contains:
-*   \`User\`: Model managing credential layouts and profile keys.
-*   \`SessionManager\`: Handles token generation and expiration.
-*   \`hash_password\`: Encrypts raw passwords using \`bcrypt\`.
-Chapter 2 of the tutorial covers this implementation in detail!`
-      } else if (q.includes("db") || q.includes("database") || q.includes("connection") || q.includes("mongo")) {
-        reply = `Database connections are established inside \`src/db/connection.py\`. It defines the \`DatabaseConnection\` class and exposes a \`get_db_session\` utility. It instantiates a \`MongoDB\` database object which stores the cart schemas and transaction order logs.`
-      } else if (q.includes("catalog") || q.includes("product") || q.includes("embed")) {
-        reply = `The **Product Catalog** is managed by \`src/catalog/catalog.py\`. It handles listing, searching, and vector index generation:
-*   \`Product\`: Class defining catalog entries.
-*   \`ProductEmbedder\`: Embedding module generating high-dimensional vectors of products for semantic recommendations.
-Chapter 3 details the search structure.`
-      } else if (q.includes("cart") || q.includes("checkout") || q.includes("order")) {
-        reply = `Shopping operations are divided between \`cart.py\` and \`orders.py\`:
-*   \`ShoppingCart\` (inside \`cart.py\`): Models user items list and computes sub-totals.
-*   \`Order\` & \`POST /api/checkout\` (inside \`orders.py\`): Processes payments and inserts records to MongoDB.
-Refer to Chapters 4 and 5 for complete details.`
-      } else {
-        reply = `Based on the codebase analysis for **${tutorial.project_name}**, the core modules coordinate actions under \`src/\`. The catalog embedders feed semantic vectors to recommendation agents, while checkout routes call authentication checkers. Let me know if you would like me to explain any specific class or functions in detail!`
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo_id: tutorial.id,
+          messages: conversationHistory
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error("Local Ollama endpoint returned an error.")
       }
 
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder("utf-8")
+      let assistantMsgId = Date.now() + 1
+
+      // Set empty response block
       setMessages(prev => [...prev, {
-        id: Date.now() + 1,
+        id: assistantMsgId,
         sender: 'assistant',
-        text: reply
+        text: ''
       }])
       setIsTyping(false)
-    }, 1200 + Math.random() * 800)
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        setMessages(prev => prev.map(m => {
+          if (m.id === assistantMsgId) {
+            return { ...m, text: m.text + chunk }
+          }
+          return m
+        }))
+      }
+    } catch (err) {
+      console.error("RAG Chat stream error:", err)
+      setMessages(prev => [...prev, {
+        id: Date.now() + 2,
+        sender: 'assistant',
+        text: `⚠️ **Connection Error**: Could not stream answer from RAG server. Ensure Ollama is running locally at \`http://localhost:11434\` and the \`mistral\` model is pulled.\n\n*(Error Details: ${err.message || err})*`
+      }])
+      setIsTyping(false)
+    }
   }
 
   const handleSubmit = (e) => {
@@ -82,25 +156,68 @@ Refer to Chapters 4 and 5 for complete details.`
     handleSend(inputText)
   }
 
+  const handleClearChat = () => {
+    setMessages([
+      {
+        id: Date.now(),
+        sender: 'assistant',
+        text: `Cleared chat history. Ask me anything about **${tutorial.project_name}** repository codebase!`
+      }
+    ])
+  }
+
+  const renderMarkdown = (text) => {
+    if (window.marked) {
+      return { __html: window.marked.parse(text) }
+    }
+    return { __html: text }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 6.5rem)', maxWidth: '850px', margin: '0 auto', width: '100%', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 6.5rem)', maxWidth: '880px', margin: '0 auto', width: '100%', position: 'relative' }}>
       
-      {/* Suggestions Header */}
+      {/* Header controls for RAG Chat */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.78rem', padding: '0.2rem 0.6rem', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', color: '#10B981', fontWeight: '600' }}>
+            ● RAG Index Loaded
+          </span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Mistral Model</span>
+        </div>
+        <button 
+          onClick={handleClearChat}
+          style={{
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--border-glass)',
+            padding: '0.4rem 0.85rem',
+            borderRadius: '16px',
+            color: 'var(--text-muted)',
+            fontSize: '0.78rem',
+            cursor: 'pointer',
+            transition: 'var(--transition-fast)'
+          }}
+          className="new-tutorial-btn"
+        >
+          Clear Conversation
+        </button>
+      </div>
+
+      {/* Suggestions List */}
       {messages.length === 1 && (
-        <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-          <h3 style={{ fontSize: '0.95rem', color: '#FFFFFF', marginBottom: '0.85rem', fontWeight: '500' }}>Suggested Questions:</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ marginBottom: '1.2rem', textAlign: 'center' }}>
+          <h3 style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '0.75rem', fontWeight: '500' }}>Suggested Questions:</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
             {suggestions.map((s, idx) => (
               <button 
                 key={idx}
                 onClick={() => handleSend(s)}
                 style={{
-                  padding: '0.65rem 1.2rem',
+                  padding: '0.55rem 1rem',
                   borderRadius: '20px',
                   border: '1px solid var(--border-glass)',
                   background: 'rgba(255, 255, 255, 0.02)',
                   color: 'var(--text-muted)',
-                  fontSize: '0.85rem',
+                  fontSize: '0.82rem',
                   cursor: 'pointer',
                   transition: 'var(--transition-fast)',
                   maxWidth: '100%',
@@ -115,7 +232,7 @@ Refer to Chapters 4 and 5 for complete details.`
         </div>
       )}
 
-      {/* Messages Window */}
+      {/* Messages Scroll Panel */}
       <div 
         className="glass-panel"
         style={{
@@ -124,7 +241,7 @@ Refer to Chapters 4 and 5 for complete details.`
           padding: '1.5rem',
           display: 'flex',
           flexDirection: 'column',
-          gap: '1rem',
+          gap: '1.2rem',
           marginBottom: '1rem',
           borderRadius: 'var(--border-radius-panel)',
           scrollbarWidth: 'none'
@@ -134,9 +251,9 @@ Refer to Chapters 4 and 5 for complete details.`
           {messages.map(m => (
             <motion.div 
               key={m.id}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
+              transition={{ duration: 0.28 }}
               style={{
                 display: 'flex',
                 justifyContent: m.sender === 'user' ? 'flex-end' : 'flex-start',
@@ -144,22 +261,21 @@ Refer to Chapters 4 and 5 for complete details.`
               }}
             >
               <div 
+                className="markdown-body"
+                dangerouslySetInnerHTML={renderMarkdown(m.text)}
                 style={{
-                  maxWidth: '75%',
-                  padding: '0.85rem 1.25rem',
+                  maxWidth: '85%',
+                  padding: '0.85rem 1.35rem',
                   borderRadius: '16px',
-                  border: m.sender === 'user' ? '1px solid rgba(139, 92, 246, 0.25)' : '1px solid var(--border-glass)',
-                  background: m.sender === 'user' ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.01)',
+                  border: m.sender === 'user' ? '1px solid rgba(139, 92, 246, 0.22)' : '1px solid var(--border-glass)',
+                  background: m.sender === 'user' ? 'rgba(139, 92, 246, 0.06)' : 'rgba(255, 255, 255, 0.01)',
                   color: '#CBD5E1',
                   fontSize: '0.92rem',
-                  lineHeight: '1.5',
+                  lineHeight: '1.6',
                   textAlign: 'left',
-                  whiteSpace: 'pre-wrap',
-                  boxShadow: m.sender === 'user' ? '0 4px 15px rgba(139, 92, 246, 0.1)' : 'none'
+                  boxShadow: m.sender === 'user' ? '0 4px 15px rgba(139, 92, 246, 0.05)' : 'none'
                 }}
-              >
-                {m.text}
-              </div>
+              />
             </motion.div>
           ))}
         </AnimatePresence>
@@ -184,7 +300,7 @@ Refer to Chapters 4 and 5 for complete details.`
         <div ref={chatEndRef} />
       </div>
 
-      {/* Input Field */}
+      {/* Input bar */}
       <form onSubmit={handleSubmit} style={{ width: '100%' }}>
         <div className="input-wrapper" style={{ height: '54px', padding: '0.4rem 0.4rem 0.4rem 1.2rem', borderRadius: '30px' }}>
           <input 
@@ -192,7 +308,7 @@ Refer to Chapters 4 and 5 for complete details.`
             className="repo-input"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Ask a question about the repository..."
+            placeholder="Ask a question about the repository classes/methods..."
             style={{ fontSize: '0.95rem' }}
           />
           <button 
@@ -209,7 +325,7 @@ Refer to Chapters 4 and 5 for complete details.`
         </div>
       </form>
 
-      {/* Typing animations styles */}
+      {/* Styles for typing indicator dots */}
       <style>{`
         @keyframes typing-dot {
           0%, 100% { transform: translateY(0); opacity: 0.3; }
