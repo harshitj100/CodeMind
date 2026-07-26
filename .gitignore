@@ -107,3 +107,6 @@ uv.lock
 
 docs/*.pdf
 docs/design-cn.md
+
+# Local temp repos
+temp_repos/
