@@ -857,8 +857,8 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat/stream")
 def chat_stream(request: ChatRequest):
     """
-    Streaming repository-aware assistant chat endpoint querying MongoDB Atlas vector indices,
-    applying hyrid overlap density rerankers, and prompting local Ollama Mistral model.
+    Streaming repository-aware assistant chat endpoint supporting custom LLM providers
+    (Gemini, OpenRouter, local Ollama, etc.) with RAG code retrieval and greeting checks.
     """
     repo_id = request.repo_id
     messages = request.messages
@@ -868,37 +868,42 @@ def chat_stream(request: ChatRequest):
         
     user_query = messages[-1].content
     
-    # 1. Query vector store for top 25 chunks
-    retrieved = retrieve_relevant_chunks(repo_id, user_query, limit=25)
+    # Check if the query is a simple greeting to skip code context retrieval
+    is_greeting = re.match(r"^\s*(hello|hi|hey|hola|greetings|yo|howdy|good\s+morning|good\s+afternoon|good\s+evening)\s*[!.?]*\s*$", user_query, re.IGNORECASE)
     
-    # 2. Rerank to top 6 chunks
-    reranked = rerank_chunks(user_query, retrieved, top_k=6)
-    
-    # 3. Assemble prompt injection context
-    context_str = ""
-    for idx, c in enumerate(reranked):
-        context_str += f"\n[File: {c['path']} | Node Type: {c['type']} | Lines: {c['metadata']['start_line']}-{c['metadata']['end_line']}]\n{c['content']}\n"
-        
-    system_prompt = f"""You are a repository-aware codebase assistant. You answer questions about the codebase structure using the following retrieved code context.
-Ensure your answers are accurate and directly reference the retrieved files and line ranges.
-Format your responses with clear bullet points and markdown code block highlighting.
-If you cannot find the answer in the retrieved context, state that clearly.
-Do NOT make up information.
+    if is_greeting:
+        context_str = ""
+    else:
+        # 1. Query vector store for top 25 chunks
+        retrieved = retrieve_relevant_chunks(repo_id, user_query, limit=25)
+        # 2. Rerank to top 6 chunks
+        reranked = rerank_chunks(user_query, retrieved, top_k=6)
+        # 3. Assemble prompt injection context
+        context_str = ""
+        for idx, c in enumerate(reranked):
+            context_str += f"\n[File: {c['path']} | Node Type: {c['type']} | Lines: {c['metadata']['start_line']}-{c['metadata']['end_line']}]\n{c['content']}\n"
+            
+    system_prompt = f"""You are a helpful repository-aware codebase assistant.
+Your goal is to answer questions about the codebase structure, classes, methods, and logic.
+
+If the user's message is a greeting, introduction, or general conversational message (e.g. "hello", "hi", "how are you"), respond in a friendly and welcoming manner as an assistant. Do NOT reference code details or say there is no code context unless they specifically asked a technical question.
+If the user is asking a technical question about the codebase, use the retrieved code context below to answer it. Reference the files and line ranges where appropriate.
+If the context below does not contain the answer, explain that clearly but try to help based on general knowledge if possible.
 
 Retrieved Code Context:
-{context_str}
+{context_str if context_str else "(No code context retrieved for simple greetings)"}
 """
     
-    # 4. Build chat payloads for Ollama Mistral
-    ollama_messages = [
+    # Build chat payloads for Ollama
+    openai_messages = [
         {"role": "system", "content": system_prompt}
     ]
     for msg in messages[:-1]:
-        ollama_messages.append({"role": msg.role, "content": msg.content})
+        openai_messages.append({"role": msg.role, "content": msg.content})
         
-    ollama_messages.append({
+    openai_messages.append({
         "role": "user",
-        "content": f"Based on the code context, answer the following question: {user_query}"
+        "content": user_query
     })
     
     def generate_response():
@@ -910,7 +915,7 @@ Retrieved Code Context:
         try:
             r = requests.post(f"{ollama_url}/api/chat", json={
                 "model": ollama_model,
-                "messages": ollama_messages,
+                "messages": openai_messages,
                 "stream": True
             }, stream=True, timeout=90)
             
@@ -932,7 +937,6 @@ Retrieved Code Context:
                         pass
         except Exception as e:
             yield f"Connection Error: Could not connect to locally running Ollama model ({ollama_model}) on {ollama_url}. Please ensure Ollama is running and has '{ollama_model}' pulled."
-
     return StreamingResponse(generate_response(), media_type="text/event-stream")
 
 if __name__ == "__main__":
