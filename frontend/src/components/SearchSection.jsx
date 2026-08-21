@@ -2,7 +2,32 @@ import React, { useState, useEffect } from 'react'
 
 export default function SearchSection({ username, onGenerate }) {
   const [repoUrl, setRepoUrl] = useState('')
+  const [typedText, setTypedText] = useState('')
+  const [cursorVisible, setCursorVisible] = useState(true)
 
+  useEffect(() => {
+    setTypedText('')
+    setCursorVisible(true)
+    
+    const welcomeName = username ? username.charAt(0).toUpperCase() + username.slice(1) : 'User'
+    const fullText = `Welcome ${welcomeName}`
+    let index = 0
+
+    const typingTimer = setInterval(() => {
+      if (index < fullText.length) {
+        const charToAppend = fullText.charAt(index)
+        setTypedText((prev) => prev + charToAppend)
+        index++
+      } else {
+        clearInterval(typingTimer)
+        setTimeout(() => {
+          setCursorVisible(false)
+        }, 2000)
+      }
+    }, 80 + Math.random() * 60)
+
+    return () => clearInterval(typingTimer)
+  }, [username])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -15,7 +40,8 @@ export default function SearchSection({ username, onGenerate }) {
   return (
     <div id="search-section" className="search-section">
       <h1 className="welcome-title" id="welcome-title" style={{ fontSize: 'clamp(2.8rem, 4.5vw, 3.8rem)' }}>
-        Welcome
+        <span>{typedText}</span>
+        {cursorVisible && <span className="typewriter-cursor">|</span>}
       </h1>
 
       <div className="search-box-container">

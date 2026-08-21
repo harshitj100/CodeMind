@@ -121,3 +121,4 @@ When a user opens a project and asks a question in the chat interface:
 
 #### **Q: How does the FastAPI server work when MongoDB is not installed?**
 > *"To ensure a seamless developer setup and ease of testing, the backend features a robust mock-fallback database helper in `server.py`. If the connection to MongoDB fails or times out, the server falls back to an in-memory dictionary-based object mock. The RAG pipeline likewise switches to a NumPy-based in-memory cosine similarity search so that the web features function perfectly even without a database cluster running."*
+
